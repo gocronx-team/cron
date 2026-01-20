@@ -125,4 +125,4 @@ Cron 条目存储在数组中，按其下次激活时间排序。Cron 休眠直�
 
 ## 致谢
 
-本项目是基于 [robfig/cron](http://go.pkgdoc.org/github.com/robfig/cron#Cron) 的改进版本。
+本项目是基于 [robfig/cron](https://github.com/robfig/cron) 的改进版本。

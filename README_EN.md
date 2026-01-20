@@ -124,4 +124,4 @@ Upon waking:
 
 ## Acknowledgments
 
-This project is an improved version based on [robfig/cron](http://go.pkgdoc.org/github.com/robfig/cron#Cron).
+This project is an improved version based on [robfig/cron](https://github.com/robfig/cron).
