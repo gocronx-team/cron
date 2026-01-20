@@ -111,7 +111,7 @@ cron 表达式表示一组时间，使用 6 个空格分隔的字段。
 
 由于 Cron 服务与调用代码并发运行，必须注意确保适当的同步。
 
-所有 [cron 方法](http://go.pkgdoc.org/github.com/robfig/cron#Cron) 都设计为正确同步，只要调用者确保调用之间有明确的先行发生排序。
+所有cron method都设计为正确同步，只要调用者确保调用之间有明确的先行发生排序。
 
 ## 实现
 
@@ -122,3 +122,7 @@ Cron 条目存储在数组中，按其下次激活时间排序。Cron 休眠直�
 * 计算已运行任务的下次运行时间
 * 按下次激活时间重新排序条目数组
 * 休眠直到最早的任务
+
+## 致谢
+
+本项目是基于 [robfig/cron](http://go.pkgdoc.org/github.com/robfig/cron#Cron) 的改进版本。

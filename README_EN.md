@@ -110,7 +110,7 @@ Be aware that jobs scheduled during daylight-savings leap-ahead transitions will
 
 Since the Cron service runs concurrently with the calling code, some amount of care must be taken to ensure proper synchronization.
 
-All [cron methods](http://go.pkgdoc.org/github.com/robfig/cron#Cron) are designed to be correctly synchronized as long as the caller ensures that invocations have a clear happens-before ordering between them.
+All cron methods are designed to be correctly synchronized as long as the caller ensures that invocations have a clear happens-before ordering between them.
 
 ## Implementation
 
@@ -121,3 +121,7 @@ Upon waking:
 * it calculates the next run times for the jobs that were run
 * it re-sorts the array of entries by next activation time.
 * it goes to sleep until the soonest job.
+
+## Acknowledgments
+
+This project is an improved version based on [robfig/cron](http://go.pkgdoc.org/github.com/robfig/cron#Cron).
