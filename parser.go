@@ -302,6 +302,9 @@ func parseDescriptorWithError(spec string) (Schedule, error) {
 			Month:  all(months),
 			Dow:    all(dow),
 		}, nil
+
+	case "@reboot":
+		return &RebootSchedule{}, nil
 	}
 
 	const every = "@every "
