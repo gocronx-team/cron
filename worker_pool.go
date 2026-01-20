@@ -25,7 +25,7 @@ func (wp *WorkerPool) Submit(job func()) {
 		wp.semaphore <- struct{}{}
 	}
 	wp.wg.Add(1)
-	
+
 	go func() {
 		defer wp.wg.Done()
 		if wp.semaphore != nil {

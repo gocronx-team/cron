@@ -121,7 +121,3 @@ Upon waking:
 * it calculates the next run times for the jobs that were run
 * it re-sorts the array of entries by next activation time.
 * it goes to sleep until the soonest job.
-
-## License
-
-MIT License

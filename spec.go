@@ -12,7 +12,7 @@ type SpecSchedule struct {
 }
 
 // RebootSchedule runs once at startup and never again.
-type RebootSchedule struct{
+type RebootSchedule struct {
 	// runOnce ensures the job only runs once
 	ran uint32
 }

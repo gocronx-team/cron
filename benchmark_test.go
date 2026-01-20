@@ -49,13 +49,13 @@ func BenchmarkRemoveJob(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.StopTimer()
-			
+
 			// 准备测试数据
 			c := New()
 			for j := 0; j < bm.jobCount; j++ {
 				c.AddFunc("* * * * * *", func() {}, fmt.Sprintf("job-%d", j))
 			}
-			
+
 			b.StartTimer()
 			for i := 0; i < b.N; i++ {
 				// 删除中间的任务
@@ -83,22 +83,22 @@ func BenchmarkSchedulerLoop(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ReportAllocs()
-			
+
 			c := New()
 			var counter int64
-			
+
 			// 添加任务
 			for j := 0; j < bm.jobCount; j++ {
 				c.AddFunc("* * * * * *", func() {
 					atomic.AddInt64(&counter, 1)
 				}, fmt.Sprintf("job-%d", j))
 			}
-			
+
 			c.Start()
 			defer c.Stop()
-			
+
 			b.ResetTimer()
-			
+
 			// 让调度器运行 N 次循环
 			time.Sleep(time.Duration(b.N) * 100 * time.Millisecond)
 		})
@@ -108,9 +108,9 @@ func BenchmarkSchedulerLoop(b *testing.B) {
 // BenchmarkConcurrentAdd 测试并发添加任务
 func BenchmarkConcurrentAdd(b *testing.B) {
 	benchmarks := []struct {
-		name        string
-		goroutines  int
-		jobsPerGo   int
+		name       string
+		goroutines int
+		jobsPerGo  int
 	}{
 		{"10goroutines_10jobs", 10, 10},
 		{"50goroutines_10jobs", 50, 10},
@@ -120,24 +120,24 @@ func BenchmarkConcurrentAdd(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ReportAllocs()
-			
+
 			for i := 0; i < b.N; i++ {
 				c := New()
 				c.Start()
-				
+
 				var wg sync.WaitGroup
 				wg.Add(bm.goroutines)
-				
+
 				for g := 0; g < bm.goroutines; g++ {
 					go func(gid int) {
 						defer wg.Done()
 						for j := 0; j < bm.jobsPerGo; j++ {
-							c.AddFunc("* * * * * *", func() {}, 
+							c.AddFunc("* * * * * *", func() {},
 								fmt.Sprintf("job-g%d-j%d", gid, j))
 						}
 					}(g)
 				}
-				
+
 				wg.Wait()
 				c.Stop()
 			}
@@ -160,14 +160,14 @@ func BenchmarkEntries(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ReportAllocs()
-			
+
 			c := New()
 			for j := 0; j < bm.jobCount; j++ {
 				c.AddFunc("* * * * * *", func() {}, fmt.Sprintf("job-%d", j))
 			}
 			c.Start()
 			defer c.Stop()
-			
+
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				_ = c.Entries()
@@ -192,16 +192,16 @@ func BenchmarkJobExecution(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ReportAllocs()
-			
+
 			var c *Cron
 			if bm.workerPool > 0 {
 				c = NewWithWorkerLimit(bm.workerPool)
 			} else {
 				c = New()
 			}
-			
+
 			var counter int64
-			
+
 			// 添加每秒执行的任务
 			for j := 0; j < bm.jobCount; j++ {
 				c.AddFunc("* * * * * *", func() {
@@ -209,15 +209,15 @@ func BenchmarkJobExecution(b *testing.B) {
 					time.Sleep(10 * time.Millisecond) // 模拟工作
 				}, fmt.Sprintf("job-%d", j))
 			}
-			
+
 			c.Start()
 			defer c.Stop()
-			
+
 			b.ResetTimer()
-			
+
 			// 运行 N 秒
 			time.Sleep(time.Duration(b.N) * time.Second)
-			
+
 			b.ReportMetric(float64(atomic.LoadInt64(&counter))/float64(b.N), "jobs/sec")
 		})
 	}
@@ -237,7 +237,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 	for _, bm := range benchmarks {
 		b.Run(bm.name, func(b *testing.B) {
 			b.ReportAllocs()
-			
+
 			for i := 0; i < b.N; i++ {
 				c := New()
 				for j := 0; j < bm.jobCount; j++ {

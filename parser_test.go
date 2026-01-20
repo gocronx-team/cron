@@ -113,3 +113,120 @@ func TestSpecSchedule(t *testing.T) {
 		}
 	}
 }
+
+func TestParseDescriptors(t *testing.T) {
+	tests := []struct {
+		expr     string
+		expected Schedule
+	}{
+		{"@yearly", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, 1 << 1, 1 << 1, all(dow)}},
+		{"@annually", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, 1 << 1, 1 << 1, all(dow)}},
+		{"@monthly", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, 1 << 1, all(months), all(dow)}},
+		{"@weekly", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, all(dom), all(months), 1 << 0}},
+		{"@daily", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, all(dom), all(months), all(dow)}},
+		{"@midnight", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, all(dom), all(months), all(dow)}},
+		{"@hourly", &SpecSchedule{1 << 0, 1 << 0, all(hours), all(dom), all(months), all(dow)}},
+		{"@every 1h", ConstantDelaySchedule{time.Hour}},
+		{"@every 30s", ConstantDelaySchedule{30 * time.Second}},
+	}
+
+	for _, c := range tests {
+		actual := Parse(c.expr)
+		if !reflect.DeepEqual(actual, c.expected) {
+			t.Errorf("%s => (expected) %v != %v (actual)", c.expr, c.expected, actual)
+		}
+	}
+}
+
+func TestParseWithNames(t *testing.T) {
+	tests := []struct {
+		expr     string
+		expected Schedule
+	}{
+		{"0 0 0 * JAN *", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, all(dom), 1 << 1, all(dow)}},
+		{"0 0 0 * * MON", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, all(dom), all(months), 1 << 1}},
+		{"0 0 0 * JAN-MAR *", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, all(dom), 1<<1 | 1<<2 | 1<<3, all(dow)}},
+		{"0 0 0 * * MON-FRI", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, all(dom), all(months), 1<<1 | 1<<2 | 1<<3 | 1<<4 | 1<<5}},
+	}
+
+	for _, c := range tests {
+		actual := Parse(c.expr)
+		if !reflect.DeepEqual(actual, c.expected) {
+			t.Errorf("%s => (expected) %v != %v (actual)", c.expr, c.expected, actual)
+		}
+	}
+}
+
+func TestParseWithError(t *testing.T) {
+	tests := []struct {
+		expr        string
+		shouldError bool
+	}{
+		{"", true},
+		{"* * * *", true},
+		{"* * * * * * *", true},
+		{"60 * * * * *", true},
+		{"* 60 * * * *", true},
+		{"* * 24 * * *", true},
+		{"* * * 32 * *", true},
+		{"* * * * 13 *", true},
+		{"* * * * * 7", true},
+		{"* * * 0 * *", true},
+		{"* * * * 0 *", true},
+		{"5-3 * * * * *", true},
+		{"@invalid", true},
+		{"@every invalid", true},
+		{"* * * * * *", false},
+		{"0 0 0 1 1 *", false},
+		{"59 59 23 31 12 6", false},
+	}
+
+	for _, c := range tests {
+		_, err := ParseWithError(c.expr)
+		if c.shouldError && err == nil {
+			t.Errorf("%s => expected error but got none", c.expr)
+		}
+		if !c.shouldError && err != nil {
+			t.Errorf("%s => unexpected error: %v", c.expr, err)
+		}
+	}
+}
+
+func TestQuestionMark(t *testing.T) {
+	tests := []struct {
+		expr     string
+		expected Schedule
+	}{
+		{"? ? ? ? ? ?", &SpecSchedule{all(seconds), all(minutes), all(hours), all(dom), all(months), all(dow)}},
+		{"0 0 0 ? * *", &SpecSchedule{1 << 0, 1 << 0, 1 << 0, all(dom), all(months), all(dow)}},
+	}
+
+	for _, c := range tests {
+		actual := Parse(c.expr)
+		if !reflect.DeepEqual(actual, c.expected) {
+			t.Errorf("%s => (expected) %v != %v (actual)", c.expr, c.expected, actual)
+		}
+	}
+}
+
+func TestComplexExpressions(t *testing.T) {
+	tests := []struct {
+		expr string
+	}{
+		{"0 0 12 * * ?"},
+		{"0 15 10 * * ?"},
+		{"0 0/5 14 * * ?"},
+		{"0 0-5 14 * * ?"},
+		{"0 10,44 14 * 3 3"},
+		{"0 15 10 * * 1-5"},
+		{"*/5 * * * * *"},
+		{"0 */5 * * * *"},
+	}
+
+	for _, c := range tests {
+		_, err := ParseWithError(c.expr)
+		if err != nil {
+			t.Errorf("%s => unexpected error: %v", c.expr, err)
+		}
+	}
+}

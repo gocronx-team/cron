@@ -103,7 +103,8 @@ func getFieldWithError(field string, r bounds) (uint64, error) {
 }
 
 // getRange returns the bits indicated by the given expression:
-//   number | number "-" number [ "/" number ]
+//
+//	number | number "-" number [ "/" number ]
 func getRange(expr string, r bounds) uint64 {
 	bits, err := getRangeWithError(expr, r)
 	if err != nil {
@@ -113,7 +114,8 @@ func getRange(expr string, r bounds) uint64 {
 }
 
 // getRangeWithError returns the bits indicated by the given expression:
-//   number | number "-" number [ "/" number ]
+//
+//	number | number "-" number [ "/" number ]
 func getRangeWithError(expr string, r bounds) (uint64, error) {
 	var (
 		start, end, step uint
