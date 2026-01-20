@@ -16,6 +16,7 @@ type entries []*Entry
 // be inspected while running.
 type Cron struct {
 	entries    entries
+	entryIndex map[string]*Entry // 优化: 添加索引Map加速查找
 	stop       chan struct{}
 	add        chan *Entry
 	remove     chan string
@@ -58,6 +59,9 @@ type Entry struct {
 
 	// OriginalJob stores the unwrapped job for backward compatibility
 	OriginalJob Job
+
+	// timer holds the timer for this entry (优化: 独立Timer)
+	timer *time.Timer
 }
 
 // byTime is a wrapper for sorting the entry array by time
@@ -83,6 +87,7 @@ func (s byTime) Less(i, j int) bool {
 func New() *Cron {
 	return &Cron{
 		entries:    nil,
+		entryIndex: make(map[string]*Entry), // 优化: 初始化索引Map
 		add:        make(chan *Entry),
 		remove:     make(chan string),
 		stop:       make(chan struct{}),
@@ -140,13 +145,27 @@ func (c *Cron) RemoveJob(name string) {
 // Returns true if the job was found and removed, false otherwise.
 func (c *Cron) RemoveJobWithResult(name string) bool {
 	if !c.running {
-		i := c.entries.pos(name)
-
-		if i == -1 {
+		// 优化: 使用索引Map快速查找
+		entry, exists := c.entryIndex[name]
+		if !exists {
 			return false
 		}
 
-		c.entries = c.entries[:i+copy(c.entries[i:], c.entries[i+1:])]
+		// 停止timer
+		if entry.timer != nil {
+			entry.timer.Stop()
+		}
+
+		// 从数组中删除
+		for i, e := range c.entries {
+			if e.Name == name {
+				c.entries = append(c.entries[:i], c.entries[i+1:]...)
+				break
+			}
+		}
+
+		// 从索引中删除
+		delete(c.entryIndex, name)
 		return true
 	}
 
@@ -179,11 +198,12 @@ func (c *Cron) ScheduleWithError(schedule Schedule, cmd Job, name string) error 
 	}
 
 	if !c.running {
-		i := c.entries.pos(entry.Name)
-		if i != -1 {
+		// 优化: 使用索引Map快速检查重名
+		if _, exists := c.entryIndex[name]; exists {
 			return errors.New("cron: job name already exists")
 		}
 		c.entries = append(c.entries, entry)
+		c.entryIndex[name] = entry // 优化: 添加到索引
 		return nil
 	}
 
@@ -214,61 +234,85 @@ func (c *Cron) run() {
 	now := time.Now().Local()
 	for _, entry := range c.entries {
 		entry.Next = entry.Schedule.Next(now)
+		c.scheduleEntry(entry) // 优化: 为每个任务创建独立Timer
 	}
 
 	for {
-		// Determine the next entry to run.
-		sort.Sort(byTime(c.entries))
-
-		var effective time.Time
-		if len(c.entries) == 0 || c.entries[0].Next.IsZero() {
-			// If there are no entries yet, just sleep - it still handles new entries
-			// and stop requests.
-			effective = now.AddDate(10, 0, 0)
-		} else {
-			effective = c.entries[0].Next
-		}
-
 		select {
-		case now = <-time.After(effective.Sub(now)):
-			// Run every entry whose next time was this effective time.
-			for _, e := range c.entries {
-				if e.Next != effective {
-					break
-				}
-				c.workerPool.Submit(e.Job.Run)
-				e.Prev = e.Next
-				e.Next = e.Schedule.Next(effective)
-			}
-			continue
-
 		case newEntry := <-c.add:
-			i := c.entries.pos(newEntry.Name)
-			if i != -1 {
+			// 优化: 使用索引Map检查重名
+			if _, exists := c.entryIndex[newEntry.Name]; exists {
 				break
 			}
 			c.entries = append(c.entries, newEntry)
+			c.entryIndex[newEntry.Name] = newEntry
 			newEntry.Next = newEntry.Schedule.Next(time.Now().Local())
+			c.scheduleEntry(newEntry) // 优化: 创建独立Timer
 
 		case name := <-c.remove:
-			i := c.entries.pos(name)
-
-			if i == -1 {
+			// 优化: 使用索引Map快速查找
+			entry, exists := c.entryIndex[name]
+			if !exists {
 				break
 			}
 
-			c.entries = c.entries[:i+copy(c.entries[i:], c.entries[i+1:])]
+			// 停止timer
+			if entry.timer != nil {
+				entry.timer.Stop()
+			}
+
+			// 从数组中删除
+			for i, e := range c.entries {
+				if e.Name == name {
+					c.entries = append(c.entries[:i], c.entries[i+1:]...)
+					break
+				}
+			}
+
+			// 从索引中删除
+			delete(c.entryIndex, name)
 
 		case <-c.snapshot:
 			c.snapshot <- c.entrySnapshot()
 
 		case <-c.stop:
+			// 停止所有timer
+			for _, entry := range c.entries {
+				if entry.timer != nil {
+					entry.timer.Stop()
+				}
+			}
 			return
 		}
-
-		// 'now' should be updated after newEntry and snapshot cases.
-		now = time.Now().Local()
 	}
+}
+
+// scheduleEntry creates a timer for the entry (优化: 独立Timer调度)
+func (c *Cron) scheduleEntry(e *Entry) {
+	if e.Next.IsZero() {
+		return
+	}
+
+	// 停止旧timer
+	if e.timer != nil {
+		e.timer.Stop()
+	}
+
+	// 创建新timer
+	duration := e.Next.Sub(time.Now().Local())
+	if duration < 0 {
+		duration = 0
+	}
+
+	e.timer = time.AfterFunc(duration, func() {
+		// 执行任务
+		c.workerPool.Submit(e.Job.Run)
+		e.Prev = e.Next
+		e.Next = e.Schedule.Next(e.Next)
+
+		// 重新调度
+		c.scheduleEntry(e)
+	})
 }
 
 // Stop the cron scheduler.
@@ -334,16 +378,19 @@ func (c *Cron) GetMetrics() Metrics {
 
 // entrySnapshot returns a copy of the current cron entry list.
 func (c *Cron) entrySnapshot() []*Entry {
-	entries := []*Entry{}
+	// 优化: 预分配切片容量
+	entries := make([]*Entry, 0, len(c.entries))
 	for _, e := range c.entries {
 		entries = append(entries, &Entry{
 			Schedule:    e.Schedule,
 			Next:        e.Next,
 			Prev:        e.Prev,
-			Job:         e.OriginalJob, // Return original job for backward compatibility
+			Job:         e.OriginalJob,
 			OriginalJob: e.OriginalJob,
 			Name:        e.Name,
 		})
 	}
+	// 保持向后兼容: 使用原有的排序方式
+	sort.Sort(byTime(entries))
 	return entries
 }

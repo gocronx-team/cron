@@ -1,0 +1,85 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gocronx-team/cron
+cpu: Apple M4
+BenchmarkAddJob/10jobs-10    	  537133	      4282 ns/op	    6720 B/op	     241 allocs/op
+BenchmarkAddJob/10jobs-10    	  503222	      4324 ns/op	    6720 B/op	     241 allocs/op
+BenchmarkAddJob/10jobs-10    	  566564	      4277 ns/op	    6720 B/op	     241 allocs/op
+BenchmarkAddJob/50jobs-10    	  110360	     21982 ns/op	   31494 B/op	    1163 allocs/op
+BenchmarkAddJob/50jobs-10    	  110892	     21767 ns/op	   31494 B/op	    1163 allocs/op
+BenchmarkAddJob/50jobs-10    	  110266	     21736 ns/op	   31494 B/op	    1163 allocs/op
+BenchmarkAddJob/100jobs-10   	   50436	     47473 ns/op	   62660 B/op	    2314 allocs/op
+BenchmarkAddJob/100jobs-10   	   50859	     47507 ns/op	   62660 B/op	    2314 allocs/op
+BenchmarkAddJob/100jobs-10   	   42091	     48531 ns/op	   62660 B/op	    2314 allocs/op
+BenchmarkAddJob/500jobs-10   	    6842	    349547 ns/op	  311908 B/op	   11760 allocs/op
+BenchmarkAddJob/500jobs-10   	    6901	    347390 ns/op	  311906 B/op	   11760 allocs/op
+BenchmarkAddJob/500jobs-10   	    6771	    351477 ns/op	  311906 B/op	   11760 allocs/op
+BenchmarkRemoveJob/10jobs-10 	 5582526	       431.4 ns/op	     597 B/op	      23 allocs/op
+BenchmarkRemoveJob/10jobs-10 	 5534804	       438.8 ns/op	     597 B/op	      23 allocs/op
+BenchmarkRemoveJob/10jobs-10 	 5532276	       434.3 ns/op	     597 B/op	      23 allocs/op
+BenchmarkRemoveJob/50jobs-10 	 4385287	       553.3 ns/op	     600 B/op	      23 allocs/op
+BenchmarkRemoveJob/50jobs-10 	 4407412	       545.8 ns/op	     600 B/op	      23 allocs/op
+BenchmarkRemoveJob/50jobs-10 	 4394199	       545.8 ns/op	     600 B/op	      23 allocs/op
+BenchmarkRemoveJob/100jobs-10         	 3429632	       703.2 ns/op	     600 B/op	      23 allocs/op
+BenchmarkRemoveJob/100jobs-10         	 3408357	       700.7 ns/op	     600 B/op	      23 allocs/op
+BenchmarkRemoveJob/100jobs-10         	 3383736	       747.0 ns/op	     600 B/op	      23 allocs/op
+BenchmarkRemoveJob/500jobs-10         	 1385143	      1739 ns/op	     600 B/op	      23 allocs/op
+BenchmarkRemoveJob/500jobs-10         	 1397238	      1713 ns/op	     600 B/op	      23 allocs/op
+BenchmarkRemoveJob/500jobs-10         	 1393599	      1792 ns/op	     600 B/op	      23 allocs/op
+BenchmarkSchedulerLoop/10jobs-10      	      22	 100044532 ns/op	     344 B/op	       4 allocs/op
+BenchmarkSchedulerLoop/10jobs-BenchmarkJobExecution/100jobs_50workers-10            	       1	1001019416 ns/op	       100.0 jobs/sec	   15040 B/op	     309 allocs/op
+BenchmarkMemoryUsage/10jobs-10                        	       2	 101111188 ns/op	    8060 B/op	     250 allocs/op
+BenchmarkMemoryUsage/100jobs-10                       	       2	 101249083 ns/op	   63876 B/op	    2322 allocs/op
+BenchmarkMemoryUsage/1000jobs-10                      	       2	 102416666 ns/op	  625292 B/op	   23770 allocs/op
+PASS
+ok  	github.com/gocronx-team/cron	10.711s
+    1037 B/op	      28 allocs/op
+BenchmarkSchedulerLoop/100jobs-10     	      22	 100028903 ns/op	    1760 B/op	      21 allocs/op
+BenchmarkSchedulerLoop/100jobs-10     	      22	 100005455 ns/op	    1676 B/op	      21 allocs/op
+BenchmarkSchedulerLoop/500jobs-10     	      22	 100048229 ns/op	    2223 B/op	      91 allocs/op
+BenchmarkSchedulerLoop/500jobs-10     	      22	 100047508 ns/op	    2712 B/op	      92 allocs/op
+BenchmarkSchedulerLoop/500jobs-10     	      22	 100033496 ns/op	    2223 B/op	      91 allocs/op
+BenchmarkConcurrentAdd/10goroutines_10jobs-10         	   22039	    117503 ns/op	   93278 B/op	    2740 allocs/op
+BenchmarkConcurrentAdd/10goroutines_10jobs-10         	   20090	    110104 ns/op	   91916 B/op	    2740 allocs/op
+BenchmarkConcurrentAdd/10goroutines_10jobs-10         	   21237	    115025 ns/op	   91810 B/op	    2740 allocs/op
+BenchmarkConcurrentAdd/50goroutines_10jobs-10         	    2449	   1020103 ns/op	  453070 B/op	   13622 allocs/op
+BenchmarkConcurrentAdd/50goroutines_10jobs-10         	    2449	   1009694 ns/op	  453052 B/op	   13622 allocs/op
+BenchmarkConcurrentAdd/50goroutines_10jobs-10         	    2505	   1008202 ns/op	  453084 B/op	   13623 allocs/op
+BenchmarkConcurrentAdd/100goroutines_10jobs-10        	     694	   3501993 ns/op	  904698 B/op	   27232 allocs/op
+BenchmarkConcurrentAdd/100goroutines_10jobs-10        	     675	   3477192 ns/op	  904160 B/op	   27226 allocs/op
+BenchmarkConcurrentAdd/100goroutines_10jobs-10        	     691	   3535075 ns/op	  904225 B/op	   27228 allocs/op
+BenchmarkEntries/10jobs-10                            	 1820109	      1310 ns/op	    1642 B/op	      19 allocs/op
+BenchmarkEntries/10jobs-10                            	 1465339	      1617 ns/op	    1640 B/op	      19 allocs/op
+BenchmarkEntries/10jobs-10                            	 1639994	      1507 ns/op	    1640 B/op	      19 allocs/op
+BenchmarkEntries/50jobs-10                            	  687760	      4017 ns/op	    6888 B/op	      61 allocs/op
+BenchmarkEntries/50jobs-10                            	  812704	      3847 ns/op	    6888 B/op	      61 allocs/op
+BenchmarkEntries/50jobs-10                            	  725499	      3849 ns/op	    6888 B/op	      61 allocs/op
+BenchmarkEntries/100jobs-10                           	  372550	      6228 ns/op	   13640 B/op	     112 allocs/op
+BenchmarkEntries/100jobs-10                           	  448554	      6101 ns/op	   13640 B/op	     112 allocs/op
+BenchmarkEntries/100jobs-10                           	  386086	      6716 ns/op	   13640 B/op	     112 allocs/op
+BenchmarkEntries/500jobs-10                           	   92608	     24682 ns/op	   65608 B/op	     514 allocs/op
+BenchmarkEntries/500jobs-10                           	   97698	     24678 ns/op	   65608 B/op	     514 allocs/op
+BenchmarkEntries/500jobs-10                           	   92509	     26277 ns/op	   65608 B/op	     514 allocs/op
+BenchmarkJobExecution/10jobs_noLimit-10               	       2	1000510021 ns/op	        10.00 jobs/sec	    1896 B/op	      36 allocs/op
+BenchmarkJobExecution/10jobs_noLimit-10               	       2	1000511938 ns/op	        10.00 jobs/sec	    1896 B/op	      36 allocs/op
+BenchmarkJobExecution/10jobs_noLimit-10               	       2	1000511479 ns/op	        10.00 jobs/sec	    1896 B/op	      36 allocs/op
+BenchmarkJobExecution/10jobs_5workers-10              	       2	1000539354 ns/op	        10.00 jobs/sec	    1896 B/op	      36 allocs/op
+BenchmarkJobExecution/10jobs_5workers-10              	       2	1000436812 ns/op	        10.00 jobs/sec	    1896 B/op	      36 allocs/op
+BenchmarkJobExecution/10jobs_5workers-10              	       2	1000522292 ns/op	        10.00 jobs/sec	    1896 B/op	      36 allocs/op
+BenchmarkJobExecution/100jobs_noLimit-10              	       2	1000251688 ns/op	       100.0 jobs/sec	   14856 B/op	     306 allocs/op
+BenchmarkJobExecution/100jobs_noLimit-10              	       2	1000145479 ns/op	       100.0 jobs/sec	   14856 B/op	     306 allocs/op
+BenchmarkJobExecution/100jobs_noLimit-10              	       2	1000441520 ns/op	       100.0 jobs/sec	   14856 B/op	     306 allocs/op
+BenchmarkJobExecution/100jobs_50workers-10            	       2	1000520479 ns/op	       100.0 jobs/sec	   14856 B/op	     306 allocs/op
+BenchmarkJobExecution/100jobs_50workers-10            	       2	1000536188 ns/op	       100.0 jobs/sec	   14856 B/op	     306 allocs/op
+BenchmarkJobExecution/100jobs_50workers-10            	       2	1000407438 ns/op	       100.0 jobs/sec	   14856 B/op	     306 allocs/op
+BenchmarkMemoryUsage/10jobs-10                        	      22	 100836316 ns/op	    7252 B/op	     249 allocs/op
+BenchmarkMemoryUsage/10jobs-10                        	      22	 101029756 ns/op	    7252 B/op	     249 allocs/op
+BenchmarkMemoryUsage/10jobs-10                        	      22	 100968392 ns/op	    7252 B/op	     249 allocs/op
+BenchmarkMemoryUsage/100jobs-10                       	      22	 100945061 ns/op	   63552 B/op	    2338 allocs/op
+BenchmarkMemoryUsage/100jobs-10                       	      22	 101140267 ns/op	   63572 B/op	    2339 allocs/op
+BenchmarkMemoryUsage/100jobs-10                       	      22	 100799453 ns/op	   63792 B/op	    2348 allocs/op
+BenchmarkMemoryUsage/1000jobs-10                      	      22	 102928356 ns/op	  629016 B/op	   23951 allocs/op
+BenchmarkMemoryUsage/1000jobs-10                      	      22	 102998388 ns/op	  628817 B/op	   23949 allocs/op
+BenchmarkMemoryUsage/1000jobs-10                      	      22	 104357074 ns/op	  628806 B/op	   23949 allocs/op
+PASS
+ok  	github.com/gocronx-team/cron	226.668s

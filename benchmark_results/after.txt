@@ -1,0 +1,32 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gocronx-team/cron
+cpu: Apple M4
+BenchmarkAddJob/10jobs-10    	   51454	      4413 ns/op	    7592 B/op	     246 allocs/op
+BenchmarkAddJob/50jobs-10    	   10000	     21974 ns/op	   35761 B/op	    1172 allocs/op
+BenchmarkAddJob/100jobs-10   	    5953	     42578 ns/op	   71217 B/op	    2325 allocs/op
+BenchmarkAddJob/500jobs-10   	    1032	    222285 ns/op	  374353 B/op	   11777 allocs/op
+BenchmarkRemoveJob/10jobs-10 	  547767	       446.0 ns/op	     613 B/op	      23 allocs/op
+BenchmarkRemoveJob/50jobs-10 	  467270	       502.9 ns/op	     616 B/op	      23 allocs/op
+BenchmarkRemoveJob/100jobs-10         	  405350	       576.6 ns/op	     616 B/op	      23 allocs/op
+BenchmarkRemoveJob/500jobs-10         	  225098	      1083 ns/op	     616 B/op	      23 allocs/op
+BenchmarkSchedulerLoop/10jobs-10      	       2	 100528458 ns/op	     968 B/op	      12 allocs/op
+BenchmarkSchedulerLoop/50jobs-10      	       2	 100153250 ns/op	    4520 B/op	      53 allocs/op
+BenchmarkSchedulerLoop/100jobs-10     	       2	 100524875 ns/op	    8000 B/op	     101 allocs/op
+BenchmarkSchedulerLoop/500jobs-10     	       2	 100064062 ns/op	   41216 B/op	     501 allocs/op
+BenchmarkConcurrentAdd/10goroutines_10jobs-10         	    2462	     90338 ns/op	   86402 B/op	    2548 allocs/op
+BenchmarkConcurrentAdd/50goroutines_10jobs-10         	     596	    401967 ns/op	  448453 B/op	   12647 allocs/op
+BenchmarkConcurrentAdd/100goroutines_10jobs-10        	     266	    865533 ns/op	  896201 B/op	   25273 allocs/op
+BenchmarkEntries/10jobs-10                            	  302613	       747.4 ns/op	    1384 B/op	      12 allocs/op
+BenchmarkEntries/50jobs-10                            	  107790	      2235 ns/op	    6840 B/op	      52 allocs/op
+BenchmarkEntries/100jobs-10                           	   65626	      3657 ns/op	   13720 B/op	     102 allocs/op
+BenchmarkEntries/500jobs-10                           	   14956	     16403 ns/op	   68124 B/op	     502 allocs/op
+BenchmarkJobExecution/10jobs_noLimit-10               	       1	1000168375 ns/op	        10.00 jobs/sec	    4256 B/op	      71 allocs/op
+BenchmarkJobExecution/10jobs_5workers-10              	       1	1001018125 ns/op	        10.00 jobs/sec	    4256 B/op	      71 allocs/op
+BenchmarkJobExecution/100jobs_noLimit-10              	       1	1001030875 ns/op	       100.0 jobs/sec	   41696 B/op	     701 allocs/op
+BenchmarkJobExecution/100jobs_50workers-10            	       1	1000047583 ns/op	       100.0 jobs/sec	   41696 B/op	     701 allocs/op
+BenchmarkMemoryUsage/10jobs-10                        	       2	 100890438 ns/op	    9932 B/op	     270 allocs/op
+BenchmarkMemoryUsage/100jobs-10                       	       2	 101469875 ns/op	   94972 B/op	    2729 allocs/op
+BenchmarkMemoryUsage/1000jobs-10                      	       2	 102610083 ns/op	  886052 B/op	   25788 allocs/op
+PASS
+ok  	github.com/gocronx-team/cron	10.467s
