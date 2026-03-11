@@ -157,6 +157,9 @@ func getRangeWithError(expr string, r bounds) (uint64, error) {
 		if err != nil {
 			return 0, err
 		}
+		if step == 0 {
+			return 0, fmt.Errorf("step must be > 0: %s", expr)
+		}
 
 		// Special handling: "N/step" means "N-max/step".
 		if singleDigit {
@@ -226,7 +229,11 @@ func getBits(min, max, step uint) uint64 {
 
 	// If step is 1, use shifts.
 	if step == 1 {
-		return ^(math.MaxUint64 << (max + 1)) & (math.MaxUint64 << min)
+		bits := max - min + 1
+		if bits >= 64 {
+			return math.MaxUint64
+		}
+		return (uint64(1)<<bits - 1) << min
 	}
 
 	// Else, use a simple loop.
@@ -314,6 +321,9 @@ func parseDescriptorWithError(spec string) (Schedule, error) {
 		duration, err := time.ParseDuration(spec[len(every):])
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse duration %s: %s", spec, err)
+		}
+		if duration < time.Second {
+			return nil, fmt.Errorf("cron/constantdelay: delays of less than a second are not supported: %s", duration.String())
 		}
 		return Every(duration), nil
 	}

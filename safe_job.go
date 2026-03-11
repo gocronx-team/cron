@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
+	"sync"
 )
 
 // SafeJob wraps a Job with panic recovery
@@ -37,22 +38,25 @@ func (s SafeJob) Run() {
 	s.Job.Run()
 }
 
-// wrapJob wraps a job with panic recovery (for backward compatibility)
-func wrapJob(job Job, name string) Job {
-	return SafeJob{Job: job, Name: name}
-}
-
 // wrapJobWithMetrics wraps a job with panic recovery and metrics
 func wrapJobWithMetrics(job Job, name string, metrics *Metrics) Job {
 	return SafeJob{Job: job, Name: name, metrics: metrics}
 }
 
-// isTestMode checks if running in test environment
+var (
+	testModeOnce   sync.Once
+	testModeCached bool
+)
+
+// isTestMode checks if running in test environment (cached)
 func isTestMode() bool {
-	for _, arg := range os.Args {
-		if strings.HasPrefix(arg, "-test.") {
-			return true
+	testModeOnce.Do(func() {
+		for _, arg := range os.Args {
+			if strings.HasPrefix(arg, "-test.") {
+				testModeCached = true
+				return
+			}
 		}
-	}
-	return false
+	})
+	return testModeCached
 }

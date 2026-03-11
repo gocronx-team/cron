@@ -5,11 +5,24 @@ package cron
 import (
 	"errors"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 type entries []*Entry
+
+// addRequest is an internal message sent to run() to add an entry.
+type addRequest struct {
+	entry  *Entry
+	result chan error
+}
+
+// removeRequest is an internal message sent to run() to remove an entry.
+type removeRequest struct {
+	name   string
+	result chan bool
+}
 
 // Cron keeps track of any number of entries, invoking the associated func as
 // specified by the schedule. It may be started, stopped, and the entries may
@@ -18,10 +31,13 @@ type Cron struct {
 	entries    entries
 	entryIndex map[string]*Entry // 优化: 添加索引Map加速查找
 	stop       chan struct{}
-	add        chan *Entry
-	remove     chan string
+	done       chan struct{} // closed when run() exits
+	add        chan addRequest
+	remove     chan removeRequest
 	snapshot   chan entries
-	running    bool
+	fire       chan *Entry // timer callbacks send fired entries here
+	running    int32       // atomic: 0=stopped, 1=running
+	mu         sync.Mutex  // protects entries/entryIndex when not running
 	workerPool *WorkerPool
 	metrics    *Metrics
 }
@@ -62,6 +78,9 @@ type Entry struct {
 
 	// timer holds the timer for this entry (优化: 独立Timer)
 	timer *time.Timer
+
+	// cancelled is set when the entry is removed; timer callback checks this
+	cancelled bool
 }
 
 // byTime is a wrapper for sorting the entry array by time
@@ -83,17 +102,24 @@ func (s byTime) Less(i, j int) bool {
 	return s[i].Next.Before(s[j].Next)
 }
 
+// isRunning returns whether the cron scheduler is currently running.
+func (c *Cron) isRunning() bool {
+	return atomic.LoadInt32(&c.running) == 1
+}
+
 // New returns a new Cron job runner.
 func New() *Cron {
 	return &Cron{
 		entries:    nil,
 		entryIndex: make(map[string]*Entry), // 优化: 初始化索引Map
-		add:        make(chan *Entry),
-		remove:     make(chan string),
+		add:        make(chan addRequest),
+		remove:     make(chan removeRequest),
 		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
 		snapshot:   make(chan entries),
-		running:    false,
-		workerPool: NewWorkerPool(0), // No limit by default
+		fire:       make(chan *Entry, 64),
+		running:    0,
+		workerPool: NewWorkerPool(0), // Default cap: NumCPU * 128
 		metrics:    &Metrics{},
 	}
 }
@@ -144,14 +170,18 @@ func (c *Cron) RemoveJob(name string) {
 // RemoveJobWithResult removes a Job from the Cron based on name.
 // Returns true if the job was found and removed, false otherwise.
 func (c *Cron) RemoveJobWithResult(name string) bool {
-	if !c.running {
+	if !c.isRunning() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
 		// 优化: 使用索引Map快速查找
 		entry, exists := c.entryIndex[name]
 		if !exists {
 			return false
 		}
 
-		// 停止timer
+		// 标记取消并停止timer
+		entry.cancelled = true
 		if entry.timer != nil {
 			entry.timer.Stop()
 		}
@@ -169,8 +199,18 @@ func (c *Cron) RemoveJobWithResult(name string) bool {
 		return true
 	}
 
-	c.remove <- name
-	return true // Assume success for running cron
+	req := removeRequest{name: name, result: make(chan bool, 1)}
+	select {
+	case c.remove <- req:
+		select {
+		case r := <-req.result:
+			return r
+		case <-c.done:
+			return false
+		}
+	case <-c.done:
+		return false
+	}
 }
 
 func (entrySlice entries) pos(name string) int {
@@ -197,7 +237,10 @@ func (c *Cron) ScheduleWithError(schedule Schedule, cmd Job, name string) error 
 		Name:        name,
 	}
 
-	if !c.running {
+	if !c.isRunning() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
 		// 优化: 使用索引Map快速检查重名
 		if _, exists := c.entryIndex[name]; exists {
 			return errors.New("cron: job name already exists")
@@ -207,23 +250,50 @@ func (c *Cron) ScheduleWithError(schedule Schedule, cmd Job, name string) error 
 		return nil
 	}
 
-	c.add <- entry
-	return nil
+	req := addRequest{entry: entry, result: make(chan error, 1)}
+	select {
+	case c.add <- req:
+		select {
+		case err := <-req.result:
+			return err
+		case <-c.done:
+			return errors.New("cron: scheduler stopped")
+		}
+	case <-c.done:
+		return errors.New("cron: scheduler stopped")
+	}
 }
 
 // Entries returns a snapshot of the cron entries.
 func (c *Cron) Entries() []*Entry {
-	if c.running {
-		c.snapshot <- nil
-		x := <-c.snapshot
-		return x
+	if c.isRunning() {
+		select {
+		case c.snapshot <- nil:
+			select {
+			case x := <-c.snapshot:
+				return x
+			case <-c.done:
+				// run() exited, fall through
+			}
+		case <-c.done:
+			// run() exited, fall through
+		}
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.entrySnapshot()
 }
 
 // Start the cron scheduler in its own go-routine.
 func (c *Cron) Start() {
-	c.running = true
+	c.mu.Lock()
+	if c.isRunning() {
+		c.mu.Unlock()
+		return
+	}
+	c.done = make(chan struct{})
+	atomic.StoreInt32(&c.running, 1)
+	c.mu.Unlock()
 	go c.run()
 }
 
@@ -231,46 +301,68 @@ func (c *Cron) Start() {
 // access to the 'running' state variable.
 func (c *Cron) run() {
 	// Figure out the next activation times for each entry.
+	c.mu.Lock()
 	now := time.Now().Local()
 	for _, entry := range c.entries {
+		entry.cancelled = false // 重置: 确保 Stop()+Start() 后任务能正常执行
 		entry.Next = entry.Schedule.Next(now)
 		c.scheduleEntry(entry) // 优化: 为每个任务创建独立Timer
 	}
+	c.mu.Unlock()
 
 	for {
 		select {
-		case newEntry := <-c.add:
+		case req := <-c.add:
 			// 优化: 使用索引Map检查重名
-			if _, exists := c.entryIndex[newEntry.Name]; exists {
+			if _, exists := c.entryIndex[req.entry.Name]; exists {
+				req.result <- errors.New("cron: job name already exists")
 				break
 			}
-			c.entries = append(c.entries, newEntry)
-			c.entryIndex[newEntry.Name] = newEntry
-			newEntry.Next = newEntry.Schedule.Next(time.Now().Local())
-			c.scheduleEntry(newEntry) // 优化: 创建独立Timer
+			c.entries = append(c.entries, req.entry)
+			c.entryIndex[req.entry.Name] = req.entry
+			req.entry.Next = req.entry.Schedule.Next(time.Now().Local())
+			c.scheduleEntry(req.entry) // 优化: 创建独立Timer
+			req.result <- nil
 
-		case name := <-c.remove:
+		case req := <-c.remove:
 			// 优化: 使用索引Map快速查找
-			entry, exists := c.entryIndex[name]
+			entry, exists := c.entryIndex[req.name]
 			if !exists {
+				req.result <- false
 				break
 			}
 
-			// 停止timer
+			// 标记取消并停止timer
+			entry.cancelled = true
 			if entry.timer != nil {
 				entry.timer.Stop()
 			}
 
 			// 从数组中删除
 			for i, e := range c.entries {
-				if e.Name == name {
+				if e.Name == req.name {
 					c.entries = append(c.entries[:i], c.entries[i+1:]...)
 					break
 				}
 			}
 
 			// 从索引中删除
-			delete(c.entryIndex, name)
+			delete(c.entryIndex, req.name)
+			req.result <- true
+
+		case e := <-c.fire:
+			// 检查 entry 是否已被取消或不在索引中
+			if e.cancelled {
+				break
+			}
+			if _, exists := c.entryIndex[e.Name]; !exists {
+				break
+			}
+			// 所有 Entry 修改都在 run() goroutine 中完成
+			c.workerPool.Submit(e.Job.Run)
+			e.Prev = e.Next
+			e.Next = e.Schedule.Next(e.Next)
+			c.scheduleEntry(e)
 
 		case <-c.snapshot:
 			c.snapshot <- c.entrySnapshot()
@@ -278,10 +370,13 @@ func (c *Cron) run() {
 		case <-c.stop:
 			// 停止所有timer
 			for _, entry := range c.entries {
+				entry.cancelled = true
 				if entry.timer != nil {
 					entry.timer.Stop()
 				}
 			}
+			atomic.StoreInt32(&c.running, 0)
+			close(c.done)
 			return
 		}
 	}
@@ -305,41 +400,45 @@ func (c *Cron) scheduleEntry(e *Entry) {
 	}
 
 	e.timer = time.AfterFunc(duration, func() {
-		// 执行任务
-		c.workerPool.Submit(e.Job.Run)
-		e.Prev = e.Next
-		e.Next = e.Schedule.Next(e.Next)
-
-		// 重新调度
-		c.scheduleEntry(e)
+		// Timer 回调只发信号，不做任何 Entry 修改
+		select {
+		case c.fire <- e:
+		case <-c.done:
+			// run() 已退出，丢弃
+		}
 	})
 }
 
 // Stop the cron scheduler.
 func (c *Cron) Stop() {
-	if !c.running {
+	if !c.isRunning() {
 		return
 	}
-	c.stop <- struct{}{}
-	c.running = false
+	select {
+	case c.stop <- struct{}{}:
+	case <-c.done:
+		return
+	}
+	<-c.done
 }
 
 // StopWithTimeout stops the cron scheduler with a timeout.
 // Returns error if timeout is exceeded.
 func (c *Cron) StopWithTimeout(timeout time.Duration) error {
-	if !c.running {
+	if !c.isRunning() {
 		return nil
 	}
 
-	done := make(chan struct{})
-	go func() {
-		c.stop <- struct{}{}
-		close(done)
-	}()
-
+	// 发送 stop 信号
 	select {
-	case <-done:
-		c.running = false
+	case c.stop <- struct{}{}:
+	case <-c.done:
+		return nil
+	}
+
+	// 等待 run() 退出
+	select {
+	case <-c.done:
 		return nil
 	case <-time.After(timeout):
 		return errors.New("cron: stop timeout exceeded")

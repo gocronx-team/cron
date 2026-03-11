@@ -25,8 +25,8 @@ func (rs *RebootSchedule) Next(t time.Time) time.Time {
 		// First execution: RebootDelay seconds from now
 		return t.Add(RebootDelay)
 	}
-	// Second execution: far in the future (will effectively never run)
-	return time.Date(2099, 1, 1, 0, 0, 0, 0, t.Location())
+	// Already ran: return zero time to signal scheduler to stop scheduling this entry
+	return time.Time{}
 }
 
 // bounds provides a range of acceptable values (plus a map of name to value).

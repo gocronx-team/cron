@@ -41,19 +41,17 @@ func TestRebootScheduleConcurrency(t *testing.T) {
 	// Verify that exactly one execution happened at the expected time
 	// (baseTime + RebootDelay), and all other calls returned the far future time
 	expectedFirstRun := baseTime.Add(RebootDelay)
-	expectedFutureTime := time.Date(2099, 1, 1, 0, 0, 0, 0, baseTime.Location())
-
 	firstRunCount := 0
-	futureRunCount := 0
+	zeroTimeCount := 0
 
 	for _, result := range results {
 		if result.Equal(expectedFirstRun) {
 			firstRunCount++
-		} else if result.Equal(expectedFutureTime) {
-			futureRunCount++
+		} else if result.IsZero() {
+			zeroTimeCount++
 		} else {
-			t.Errorf("Unexpected time returned: %v, expected either %v or %v",
-				result, expectedFirstRun, expectedFutureTime)
+			t.Errorf("Unexpected time returned: %v, expected either %v or zero time",
+				result, expectedFirstRun)
 		}
 	}
 
@@ -61,12 +59,12 @@ func TestRebootScheduleConcurrency(t *testing.T) {
 	if firstRunCount != 1 {
 		t.Errorf("Expected exactly 1 first run, got %d", firstRunCount)
 	}
-	if futureRunCount != 9 {
-		t.Errorf("Expected exactly 9 future runs, got %d", futureRunCount)
+	if zeroTimeCount != 9 {
+		t.Errorf("Expected exactly 9 zero-time runs, got %d", zeroTimeCount)
 	}
 
-	t.Logf("Successfully verified concurrency: %d first run, %d future runs",
-		firstRunCount, futureRunCount)
+	t.Logf("Successfully verified concurrency: %d first run, %d zero-time runs",
+		firstRunCount, zeroTimeCount)
 }
 
 // TestRebootScheduleSequential tests that RebootSchedule works correctly in sequential calls
@@ -82,11 +80,10 @@ func TestRebootScheduleSequential(t *testing.T) {
 		t.Errorf("First call: expected %v, got %v", expectedFirst, firstResult)
 	}
 
-	// Second call should return time in far future
+	// Second call should return zero time (no more runs)
 	secondResult := schedule.Next(baseTime)
-	expectedFuture := time.Date(2099, 1, 1, 0, 0, 0, 0, baseTime.Location())
 
-	if !secondResult.Equal(expectedFuture) {
-		t.Errorf("Second call: expected %v, got %v", expectedFuture, secondResult)
+	if !secondResult.IsZero() {
+		t.Errorf("Second call: expected zero time, got %v", secondResult)
 	}
 }
