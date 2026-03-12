@@ -39,16 +39,40 @@ func ParseWithError(spec string) (Schedule, error) {
 		return parseDescriptorWithError(spec)
 	}
 
-	// Split on whitespace.  We require 5 or 6 fields.
-	// (second) (minute) (hour) (day of month) (month) (day of week, optional)
-	fields := strings.Fields(spec)
-	if len(fields) != 5 && len(fields) != 6 {
-		return nil, fmt.Errorf("expected 5 or 6 fields, found %d: %s", len(fields), spec)
+	// Zero-alloc whitespace field splitting using a stack array.
+	var fields [6]string
+	fieldCount := 0
+	i := 0
+	n := len(spec)
+	for fieldCount < 6 && i < n {
+		for i < n && (spec[i] == ' ' || spec[i] == '\t') {
+			i++
+		}
+		if i >= n {
+			break
+		}
+		start := i
+		for i < n && spec[i] != ' ' && spec[i] != '\t' {
+			i++
+		}
+		fields[fieldCount] = spec[start:i]
+		fieldCount++
+	}
+	// Check for extra fields beyond 6
+	for i < n && (spec[i] == ' ' || spec[i] == '\t') {
+		i++
+	}
+	if i < n {
+		fieldCount = 7
+	}
+
+	if fieldCount != 5 && fieldCount != 6 {
+		return nil, fmt.Errorf("expected 5 or 6 fields, found %d: %s", fieldCount, spec)
 	}
 
 	// If a sixth field is not provided (DayOfWeek), then it is equivalent to star.
-	if len(fields) == 5 {
-		fields = append(fields, "*")
+	if fieldCount == 5 {
+		fields[5] = "*"
 	}
 
 	var err error
@@ -89,10 +113,21 @@ func getField(field string, r bounds) uint64 {
 // getFieldWithError returns an Int with the bits set representing all of the times that
 // the field represents.  A "field" is a comma-separated list of "ranges".
 func getFieldWithError(field string, r bounds) (uint64, error) {
-	// list = range {"," range}
+	// Zero-alloc comma splitting using IndexByte.
 	var bits uint64
-	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
-	for _, expr := range ranges {
+	for len(field) > 0 {
+		idx := strings.IndexByte(field, ',')
+		var expr string
+		if idx < 0 {
+			expr = field
+			field = ""
+		} else {
+			expr = field[:idx]
+			field = field[idx+1:]
+		}
+		if len(expr) == 0 {
+			continue
+		}
 		b, err := getRangeWithError(expr, r)
 		if err != nil {
 			return 0, err
@@ -117,56 +152,74 @@ func getRange(expr string, r bounds) uint64 {
 //
 //	number | number "-" number [ "/" number ]
 func getRangeWithError(expr string, r bounds) (uint64, error) {
-	var (
-		start, end, step uint
-		rangeAndStep     = strings.Split(expr, "/")
-		lowAndHigh       = strings.Split(rangeAndStep[0], "-")
-		singleDigit      = len(lowAndHigh) == 1
-	)
+	var start, end, step uint
+
+	// Zero-alloc: split on "/" using IndexByte
+	rangePart := expr
+	stepPart := ""
+	hasStep := false
+	if slashIdx := strings.IndexByte(expr, '/'); slashIdx >= 0 {
+		rangePart = expr[:slashIdx]
+		rest := expr[slashIdx+1:]
+		if strings.IndexByte(rest, '/') >= 0 {
+			return 0, fmt.Errorf("too many slashes: %s", expr)
+		}
+		stepPart = rest
+		hasStep = true
+	}
+
+	// Zero-alloc: split rangePart on "-" using IndexByte
+	lowPart := rangePart
+	highPart := ""
+	hasHigh := false
+	if hyphenIdx := strings.IndexByte(rangePart, '-'); hyphenIdx >= 0 {
+		lowPart = rangePart[:hyphenIdx]
+		rest := rangePart[hyphenIdx+1:]
+		if strings.IndexByte(rest, '-') >= 0 {
+			return 0, fmt.Errorf("too many hyphens: %s", expr)
+		}
+		highPart = rest
+		hasHigh = true
+	}
+
+	singleDigit := !hasHigh
 
 	var extra_star uint64
-	if lowAndHigh[0] == "*" || lowAndHigh[0] == "?" {
+	if lowPart == "*" || lowPart == "?" {
 		start = r.min
 		end = r.max
 		extra_star = starBit
 	} else {
 		var err error
-		start, err = parseIntOrNameWithError(lowAndHigh[0], r.names)
+		start, err = parseIntOrNameWithError(lowPart, r.names)
 		if err != nil {
 			return 0, err
 		}
-		switch len(lowAndHigh) {
-		case 1:
-			end = start
-		case 2:
-			end, err = parseIntOrNameWithError(lowAndHigh[1], r.names)
+		if hasHigh {
+			end, err = parseIntOrNameWithError(highPart, r.names)
 			if err != nil {
 				return 0, err
 			}
-		default:
-			return 0, fmt.Errorf("too many hyphens: %s", expr)
+		} else {
+			end = start
 		}
 	}
 
-	switch len(rangeAndStep) {
-	case 1:
+	if !hasStep {
 		step = 1
-	case 2:
+	} else {
 		var err error
-		step, err = mustParseIntWithError(rangeAndStep[1])
+		step, err = mustParseIntWithError(stepPart)
 		if err != nil {
 			return 0, err
 		}
 		if step == 0 {
 			return 0, fmt.Errorf("step must be > 0: %s", expr)
 		}
-
 		// Special handling: "N/step" means "N-max/step".
 		if singleDigit {
 			end = r.max
 		}
-	default:
-		return 0, fmt.Errorf("too many slashes: %s", expr)
 	}
 
 	if start < r.min {

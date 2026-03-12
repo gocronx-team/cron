@@ -24,22 +24,35 @@ type removeRequest struct {
 	result chan bool
 }
 
+// Pools to reuse request objects and avoid per-call channel allocation.
+var addReqPool = sync.Pool{
+	New: func() any {
+		return &addRequest{result: make(chan error, 1)}
+	},
+}
+
+var removeReqPool = sync.Pool{
+	New: func() any {
+		return &removeRequest{result: make(chan bool, 1)}
+	},
+}
+
 // Cron keeps track of any number of entries, invoking the associated func as
 // specified by the schedule. It may be started, stopped, and the entries may
 // be inspected while running.
 type Cron struct {
-	entries    entries
-	entryIndex map[string]*Entry // 优化: 添加索引Map加速查找
-	stop       chan struct{}
-	done       chan struct{} // closed when run() exits
-	add        chan addRequest
-	remove     chan removeRequest
-	snapshot   chan entries
-	fire       chan *Entry // timer callbacks send fired entries here
-	running    int32       // atomic: 0=stopped, 1=running
-	mu         sync.Mutex  // protects entries/entryIndex when not running
-	workerPool *WorkerPool
-	metrics    *Metrics
+	entries      entries
+	entryIndex   map[string]*Entry // 优化: 添加索引Map加速查找
+	stop         chan struct{}
+	done         chan struct{} // closed when run() exits
+	add          chan addRequest
+	remove       chan removeRequest
+	snapshot     chan entries
+	fire         chan *Entry // timer callbacks send fired entries here
+	running      int32       // atomic: 0=stopped, 1=running
+	mu           sync.Mutex  // protects entries/entryIndex when not running
+	workerPool   *WorkerPool
+	metrics      *Metrics
 }
 
 // Job is an interface for submitted cron jobs.
@@ -75,6 +88,9 @@ type Entry struct {
 
 	// OriginalJob stores the unwrapped job for backward compatibility
 	OriginalJob Job
+
+	// safeJob is embedded to avoid separate allocation for SafeJob wrapper
+	safeJob SafeJob
 
 	// timer holds the timer for this entry (优化: 独立Timer)
 	timer *time.Timer
@@ -199,16 +215,20 @@ func (c *Cron) RemoveJobWithResult(name string) bool {
 		return true
 	}
 
-	req := removeRequest{name: name, result: make(chan bool, 1)}
+	req := removeReqPool.Get().(*removeRequest)
+	req.name = name
 	select {
-	case c.remove <- req:
+	case c.remove <- *req:
 		select {
 		case r := <-req.result:
+			removeReqPool.Put(req)
 			return r
 		case <-c.done:
+			removeReqPool.Put(req)
 			return false
 		}
 	case <-c.done:
+		removeReqPool.Put(req)
 		return false
 	}
 }
@@ -232,10 +252,14 @@ func (c *Cron) Schedule(schedule Schedule, cmd Job, name string) {
 func (c *Cron) ScheduleWithError(schedule Schedule, cmd Job, name string) error {
 	entry := &Entry{
 		Schedule:    schedule,
-		Job:         wrapJobWithMetrics(cmd, name, c.metrics),
 		OriginalJob: cmd,
 		Name:        name,
 	}
+	// Initialize embedded SafeJob to avoid separate allocation
+	entry.safeJob.Job = cmd
+	entry.safeJob.Name = name
+	entry.safeJob.metrics = c.metrics
+	entry.Job = &entry.safeJob
 
 	if !c.isRunning() {
 		c.mu.Lock()
@@ -250,16 +274,20 @@ func (c *Cron) ScheduleWithError(schedule Schedule, cmd Job, name string) error 
 		return nil
 	}
 
-	req := addRequest{entry: entry, result: make(chan error, 1)}
+	req := addReqPool.Get().(*addRequest)
+	req.entry = entry
 	select {
-	case c.add <- req:
+	case c.add <- *req:
 		select {
 		case err := <-req.result:
+			addReqPool.Put(req)
 			return err
 		case <-c.done:
+			addReqPool.Put(req)
 			return errors.New("cron: scheduler stopped")
 		}
 	case <-c.done:
+		addReqPool.Put(req)
 		return errors.New("cron: scheduler stopped")
 	}
 }
@@ -322,6 +350,7 @@ func (c *Cron) run() {
 			c.entryIndex[req.entry.Name] = req.entry
 			req.entry.Next = req.entry.Schedule.Next(time.Now().Local())
 			c.scheduleEntry(req.entry) // 优化: 创建独立Timer
+
 			req.result <- nil
 
 		case req := <-c.remove:
@@ -348,6 +377,7 @@ func (c *Cron) run() {
 
 			// 从索引中删除
 			delete(c.entryIndex, req.name)
+
 			req.result <- true
 
 		case e := <-c.fire:
@@ -363,6 +393,7 @@ func (c *Cron) run() {
 			e.Prev = e.Next
 			e.Next = e.Schedule.Next(e.Next)
 			c.scheduleEntry(e)
+
 
 		case <-c.snapshot:
 			c.snapshot <- c.entrySnapshot()
@@ -477,19 +508,22 @@ func (c *Cron) GetMetrics() Metrics {
 
 // entrySnapshot returns a copy of the current cron entry list.
 func (c *Cron) entrySnapshot() []*Entry {
-	// 优化: 预分配切片容量
-	entries := make([]*Entry, 0, len(c.entries))
-	for _, e := range c.entries {
-		entries = append(entries, &Entry{
-			Schedule:    e.Schedule,
-			Next:        e.Next,
-			Prev:        e.Prev,
-			Job:         e.OriginalJob,
-			OriginalJob: e.OriginalJob,
-			Name:        e.Name,
-		})
+	n := len(c.entries)
+	if n == 0 {
+		return nil
 	}
-	// 保持向后兼容: 使用原有的排序方式
-	sort.Sort(byTime(entries))
-	return entries
+	// Single allocation for all Entry copies + pointer slice
+	buf := make([]Entry, n)
+	result := make([]*Entry, n)
+	for i, e := range c.entries {
+		buf[i].Schedule = e.Schedule
+		buf[i].Next = e.Next
+		buf[i].Prev = e.Prev
+		buf[i].Job = e.OriginalJob
+		buf[i].OriginalJob = e.OriginalJob
+		buf[i].Name = e.Name
+		result[i] = &buf[i]
+	}
+	sort.Sort(byTime(result))
+	return result
 }

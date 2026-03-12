@@ -15,7 +15,7 @@ type SafeJob struct {
 	metrics *Metrics
 }
 
-func (s SafeJob) Run() {
+func (s *SafeJob) Run() {
 	if s.metrics != nil {
 		s.metrics.incActive()
 		s.metrics.incRuns()
@@ -40,7 +40,7 @@ func (s SafeJob) Run() {
 
 // wrapJobWithMetrics wraps a job with panic recovery and metrics
 func wrapJobWithMetrics(job Job, name string, metrics *Metrics) Job {
-	return SafeJob{Job: job, Name: name, metrics: metrics}
+	return &SafeJob{Job: job, Name: name, metrics: metrics}
 }
 
 var (
