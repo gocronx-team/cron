@@ -11,6 +11,26 @@ type SpecSchedule struct {
 	Second, Minute, Hour, Dom, Month, Dow uint64
 }
 
+// TZSchedule wraps a Schedule with a specific timezone.
+// Next() converts the input time to the target timezone, computes the schedule,
+// then converts back so the returned time's Location matches the input's Location.
+type TZSchedule struct {
+	schedule Schedule
+	location *time.Location
+}
+
+// Next returns the next activation time. The returned time's Location matches t's Location.
+func (tz *TZSchedule) Next(t time.Time) time.Time {
+	if tz.location == nil {
+		return tz.schedule.Next(t)
+	}
+	next := tz.schedule.Next(t.In(tz.location))
+	if next.IsZero() {
+		return next
+	}
+	return next.In(t.Location())
+}
+
 // RebootSchedule runs once at startup and never again.
 type RebootSchedule struct {
 	// runOnce ensures the job only runs once

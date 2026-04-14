@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 	"time"
+	_ "time/tzdata" // Embed timezone database for CI environments without system tzdata
 )
 
 func TestRange(t *testing.T) {
@@ -228,5 +229,243 @@ func TestComplexExpressions(t *testing.T) {
 		if err != nil {
 			t.Errorf("%s => unexpected error: %v", c.expr, err)
 		}
+	}
+}
+
+func TestParseCronTZ(t *testing.T) {
+	tests := []struct {
+		expr        string
+		shouldError bool
+		isTZ        bool
+	}{
+		// Valid CRON_TZ= prefix
+		{"CRON_TZ=Asia/Shanghai 0 30 8 * * *", false, true},
+		{"TZ=America/New_York 0 0 9 * * *", false, true},
+		{"TZ=UTC @daily", false, true},
+		{"CRON_TZ=Europe/London @hourly", false, true},
+		{"CRON_TZ=Asia/Tokyo @every 30s", false, true},
+
+		// No prefix — should work as before, not TZSchedule
+		{"0 30 8 * * *", false, false},
+		{"@daily", false, false},
+
+		// Invalid timezone
+		{"CRON_TZ=Invalid/Zone 0 0 0 * * *", true, false},
+		{"TZ=Not_A_Zone @daily", true, false},
+
+		// Missing space after timezone
+		{"CRON_TZ=Asia/Shanghai", true, false},
+
+		// Empty spec after timezone
+		{"CRON_TZ=UTC ", true, false},
+
+		// Empty timezone name
+		{"TZ= @daily", true, false},
+		{"CRON_TZ= 0 0 0 * * *", true, false},
+	}
+
+	for _, c := range tests {
+		schedule, err := ParseWithError(c.expr)
+		if c.shouldError {
+			if err == nil {
+				t.Errorf("%s => expected error but got none", c.expr)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s => unexpected error: %v", c.expr, err)
+			continue
+		}
+		_, isTZ := schedule.(*TZSchedule)
+		if isTZ != c.isTZ {
+			t.Errorf("%s => TZSchedule=%v, want %v", c.expr, isTZ, c.isTZ)
+		}
+	}
+}
+
+func mustLoadLocation(t *testing.T, name string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		t.Fatalf("LoadLocation(%q): %v", name, err)
+	}
+	return loc
+}
+
+func TestTZScheduleNext(t *testing.T) {
+	shanghai := mustLoadLocation(t, "Asia/Shanghai")
+	ny := mustLoadLocation(t, "America/New_York")
+	tokyo := mustLoadLocation(t, "Asia/Tokyo")
+	london := mustLoadLocation(t, "Europe/London")
+
+	tests := []struct {
+		name     string
+		spec     string
+		fromTime time.Time
+		expected time.Time
+	}{
+		// === Basic timezone offset ===
+		{
+			name:     "Shanghai daily 08:30",
+			spec:     "CRON_TZ=Asia/Shanghai 0 30 8 * * *",
+			fromTime: time.Date(2026, 4, 14, 0, 0, 0, 0, time.UTC),
+			expected: time.Date(2026, 4, 14, 8, 30, 0, 0, shanghai), // 00:30 UTC
+		},
+		{
+			name:     "New York daily 09:00 (EDT, UTC-4)",
+			spec:     "TZ=America/New_York 0 0 9 * * *",
+			fromTime: time.Date(2026, 4, 14, 0, 0, 0, 0, time.UTC),
+			expected: time.Date(2026, 4, 14, 9, 0, 0, 0, ny), // 13:00 UTC
+		},
+		{
+			name:     "UTC daily midnight, from just past midnight",
+			spec:     "CRON_TZ=UTC 0 0 0 * * *",
+			fromTime: time.Date(2026, 4, 14, 0, 0, 1, 0, time.UTC),
+			expected: time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC),
+		},
+
+		// === Cross-day due to timezone offset ===
+		{
+			name:     "Shanghai 01:00 is previous day 17:00 UTC",
+			spec:     "CRON_TZ=Asia/Shanghai 0 0 1 * * *",
+			fromTime: time.Date(2026, 4, 14, 16, 0, 0, 0, time.UTC), // Apr 15 00:00 Shanghai
+			expected: time.Date(2026, 4, 15, 1, 0, 0, 0, shanghai),   // Apr 14 17:00 UTC
+		},
+		{
+			name:     "NY 23:00 is next day 03:00 UTC (EDT)",
+			spec:     "CRON_TZ=America/New_York 0 0 23 * * *",
+			fromTime: time.Date(2026, 4, 14, 0, 0, 0, 0, ny),
+			expected: time.Date(2026, 4, 14, 23, 0, 0, 0, ny), // Apr 15 03:00 UTC
+		},
+
+		// === Same expression, different timezone = different UTC ===
+		{
+			name:     "09:00 in Tokyo from midnight Tokyo — fires same day",
+			spec:     "CRON_TZ=Asia/Tokyo 0 0 9 * * *",
+			fromTime: time.Date(2026, 4, 14, 0, 0, 0, 0, tokyo), // midnight Tokyo, 09:00 is ahead
+			expected: time.Date(2026, 4, 14, 9, 0, 0, 0, tokyo),  // same day 09:00 Tokyo = 00:00 UTC
+		},
+		{
+			name:     "09:00 in Tokyo from after 09:00 — fires next day",
+			spec:     "CRON_TZ=Asia/Tokyo 0 0 9 * * *",
+			fromTime: time.Date(2026, 4, 14, 10, 0, 0, 0, tokyo), // 10:00 Tokyo, past 09:00
+			expected: time.Date(2026, 4, 15, 9, 0, 0, 0, tokyo),   // next day
+		},
+
+		// === DST spring forward: March 8, 2026 NY clocks jump 2:00→3:00 ===
+		{
+			name:     "DST spring forward: 2:30 AM doesn't exist, skip to next day",
+			spec:     "CRON_TZ=America/New_York 0 30 2 * * *",
+			fromTime: time.Date(2026, 3, 8, 1, 0, 0, 0, ny),
+			// 2:30 AM doesn't exist on March 8 (clocks skip from 2:00 to 3:00).
+			// SpecSchedule.Next can't find a match on the 8th, so it advances
+			// to March 9 when 2:30 AM exists again (now in EDT).
+			expected: time.Date(2026, 3, 9, 2, 30, 0, 0, ny),
+		},
+		{
+			name:     "DST spring forward: 3:00 AM exists normally",
+			spec:     "CRON_TZ=America/New_York 0 0 3 * * *",
+			fromTime: time.Date(2026, 3, 8, 1, 0, 0, 0, ny),
+			expected: time.Date(2026, 3, 8, 3, 0, 0, 0, ny),
+		},
+
+		// === DST fall back: Nov 1, 2026 NY clocks go 2:00→1:00 ===
+		{
+			name:     "DST fall back: 1:30 AM runs in first occurrence (EDT)",
+			spec:     "CRON_TZ=America/New_York 0 30 1 * * *",
+			fromTime: time.Date(2026, 11, 1, 0, 0, 0, 0, ny),
+			expected: time.Date(2026, 11, 1, 1, 30, 0, 0, ny),
+		},
+
+		// === Day-of-week affected by timezone ===
+		{
+			name:     "Monday in Shanghai but still Sunday in UTC",
+			spec:     "CRON_TZ=Asia/Shanghai 0 0 1 * * 1", // Monday 01:00 Shanghai
+			fromTime: time.Date(2026, 4, 12, 16, 0, 0, 0, time.UTC), // Sun Apr 12 16:00 UTC = Mon Apr 13 00:00 Shanghai
+			expected: time.Date(2026, 4, 13, 1, 0, 0, 0, shanghai),   // Mon 01:00 Shanghai = Sun 17:00 UTC
+		},
+
+		// === Cross month/year boundary ===
+		{
+			name:     "Cross month: Shanghai Dec 31 23:30 → Jan 1 next year",
+			spec:     "CRON_TZ=Asia/Shanghai 0 0 0 1 * *", // 1st of every month at midnight
+			fromTime: time.Date(2026, 12, 31, 23, 30, 0, 0, shanghai),
+			expected: time.Date(2027, 1, 1, 0, 0, 0, 0, shanghai),
+		},
+
+		// === London BST (UTC+1 in summer) ===
+		{
+			name:     "London summer time (BST, UTC+1)",
+			spec:     "CRON_TZ=Europe/London 0 0 9 * * *",
+			fromTime: time.Date(2026, 7, 1, 7, 0, 0, 0, time.UTC), // 08:00 BST
+			expected: time.Date(2026, 7, 1, 9, 0, 0, 0, london),    // 08:00 UTC
+		},
+
+		// === Descriptor with timezone ===
+		{
+			name:     "@daily with Tokyo timezone",
+			spec:     "CRON_TZ=Asia/Tokyo @daily",
+			fromTime: time.Date(2026, 4, 14, 14, 0, 0, 0, time.UTC), // Apr 14 23:00 Tokyo
+			expected: time.Date(2026, 4, 15, 0, 0, 0, 0, tokyo),     // Apr 14 15:00 UTC
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			schedule := Parse(tc.spec)
+			actual := schedule.Next(tc.fromTime)
+			if !actual.UTC().Equal(tc.expected.UTC()) {
+				t.Errorf("Next(%v) = %v (UTC: %v), want %v (UTC: %v)",
+					tc.fromTime, actual, actual.UTC(), tc.expected, tc.expected.UTC())
+			}
+		})
+	}
+}
+
+func TestTZScheduleConsecutiveNext(t *testing.T) {
+	// Verify consecutive Next() calls produce correct sequence
+	shanghai := mustLoadLocation(t, "Asia/Shanghai")
+	schedule := Parse("CRON_TZ=Asia/Shanghai 0 0 9 * * *") // daily 09:00 Shanghai
+
+	current := time.Date(2026, 4, 14, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 5; i++ {
+		next := schedule.Next(current)
+		expectedDay := 14 + i
+		expected := time.Date(2026, 4, expectedDay, 9, 0, 0, 0, shanghai)
+		if !next.UTC().Equal(expected.UTC()) {
+			t.Fatalf("iteration %d: Next(%v) = %v (UTC: %v), want %v (UTC: %v)",
+				i, current, next, next.UTC(), expected, expected.UTC())
+		}
+		current = next
+	}
+}
+
+func TestTZScheduleEveryIsUnaffected(t *testing.T) {
+	// @every is a constant delay — timezone wrapping should not change the interval
+	spec := "CRON_TZ=Asia/Tokyo @every 30s"
+	schedule := Parse(spec)
+
+	from := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	next := schedule.Next(from)
+	expected := from.Add(30 * time.Second)
+	if !next.UTC().Equal(expected.UTC()) {
+		t.Errorf("@every with TZ: Next(%v) = %v, want %v", from, next.UTC(), expected.UTC())
+	}
+}
+
+func TestTZScheduleSameSpecDifferentTimezones(t *testing.T) {
+	// Same "09:00 daily" in different timezones must fire at different UTC times
+	shanghaiSched := Parse("CRON_TZ=Asia/Shanghai 0 0 9 * * *")
+	nySched := Parse("CRON_TZ=America/New_York 0 0 9 * * *")
+
+	from := time.Date(2026, 4, 14, 0, 0, 0, 0, time.UTC)
+	shanghaiNext := shanghaiSched.Next(from).UTC()
+	nyNext := nySched.Next(from).UTC()
+
+	// Shanghai 09:00 = UTC 01:00, NY 09:00 EDT = UTC 13:00 — 12 hour gap
+	diff := nyNext.Sub(shanghaiNext)
+	if diff != 12*time.Hour {
+		t.Errorf("Shanghai fires at %v UTC, NY fires at %v UTC, diff=%v, want 12h",
+			shanghaiNext, nyNext, diff)
 	}
 }

@@ -30,14 +30,56 @@ func Parse(spec string) Schedule {
 // It accepts
 //   - Full crontab specs, e.g. "* * * * * ?"
 //   - Descriptors, e.g. "@midnight", "@every 1h30m"
+//   - Timezone prefix, e.g. "CRON_TZ=Asia/Shanghai 0 30 8 * * *"
+//     or "TZ=America/New_York @daily"
 func ParseWithError(spec string) (Schedule, error) {
 	if len(spec) == 0 {
 		return nil, errors.New("empty spec string")
 	}
 
-	if spec[0] == '@' {
-		return parseDescriptorWithError(spec)
+	// Extract CRON_TZ= or TZ= prefix
+	var loc *time.Location
+	if strings.HasPrefix(spec, "CRON_TZ=") || strings.HasPrefix(spec, "TZ=") {
+		eqIdx := strings.IndexByte(spec, '=')
+		rest := spec[eqIdx+1:]
+		spIdx := strings.IndexByte(rest, ' ')
+		if spIdx < 0 {
+			return nil, fmt.Errorf("CRON_TZ/TZ= prefix requires a space before the cron expression: %s", spec)
+		}
+		tzName := rest[:spIdx]
+		if len(tzName) == 0 {
+			return nil, fmt.Errorf("empty timezone name in prefix: %s", spec)
+		}
+		var err error
+		loc, err = time.LoadLocation(tzName)
+		if err != nil {
+			return nil, fmt.Errorf("invalid timezone %q: %w", tzName, err)
+		}
+		spec = strings.TrimSpace(rest[spIdx+1:])
+		if len(spec) == 0 {
+			return nil, errors.New("empty spec string after timezone prefix")
+		}
 	}
+
+	var schedule Schedule
+	var err error
+	if spec[0] == '@' {
+		schedule, err = parseDescriptorWithError(spec)
+	} else {
+		schedule, err = parseSpecWithError(spec)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if loc != nil {
+		return &TZSchedule{schedule: schedule, location: loc}, nil
+	}
+	return schedule, nil
+}
+
+// parseSpecWithError parses a standard cron spec (not a descriptor).
+func parseSpecWithError(spec string) (Schedule, error) {
 
 	// Zero-alloc whitespace field splitting using a stack array.
 	var fields [6]string
@@ -184,11 +226,11 @@ func getRangeWithError(expr string, r bounds) (uint64, error) {
 
 	singleDigit := !hasHigh
 
-	var extra_star uint64
+	var extraStar uint64
 	if lowPart == "*" || lowPart == "?" {
 		start = r.min
 		end = r.max
-		extra_star = starBit
+		extraStar = starBit
 	} else {
 		var err error
 		start, err = parseIntOrNameWithError(lowPart, r.names)
@@ -232,16 +274,7 @@ func getRangeWithError(expr string, r bounds) (uint64, error) {
 		return 0, fmt.Errorf("beginning of range (%d) beyond end of range (%d): %s", start, end, expr)
 	}
 
-	return getBits(start, end, step) | extra_star, nil
-}
-
-// parseIntOrName returns the (possibly-named) integer contained in expr.
-func parseIntOrName(expr string, names map[string]uint) uint {
-	val, err := parseIntOrNameWithError(expr, names)
-	if err != nil {
-		log.Panic(err)
-	}
-	return val
+	return getBits(start, end, step) | extraStar, nil
 }
 
 // parseIntOrNameWithError returns the (possibly-named) integer contained in expr.
@@ -252,15 +285,6 @@ func parseIntOrNameWithError(expr string, names map[string]uint) (uint, error) {
 		}
 	}
 	return mustParseIntWithError(expr)
-}
-
-// mustParseInt parses the given expression as an int or panics.
-func mustParseInt(expr string) uint {
-	val, err := mustParseIntWithError(expr)
-	if err != nil {
-		log.Panic(err)
-	}
-	return val
 }
 
 // mustParseIntWithError parses the given expression as an int or returns error.
@@ -299,16 +323,6 @@ func getBits(min, max, step uint) uint64 {
 // all returns all bits within the given bounds.  (plus the star bit)
 func all(r bounds) uint64 {
 	return getBits(r.min, r.max, 1) | starBit
-}
-
-// parseDescriptor returns a pre-defined schedule for the expression, or panics
-// if none matches.
-func parseDescriptor(spec string) Schedule {
-	schedule, err := parseDescriptorWithError(spec)
-	if err != nil {
-		log.Panic(err)
-	}
-	return schedule
 }
 
 // parseDescriptorWithError returns a pre-defined schedule for the expression, or error
