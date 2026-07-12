@@ -30,7 +30,11 @@ func TestRange(t *testing.T) {
 	}
 
 	for _, c := range ranges {
-		actual := getRange(c.expr, bounds{c.min, c.max, nil})
+		actual, err := getRangeWithError(c.expr, bounds{c.min, c.max, nil})
+		if err != nil {
+			t.Errorf("%s => unexpected error %v", c.expr, err)
+			continue
+		}
 		if actual != c.expected {
 			t.Errorf("%s => (expected) %d != %d (actual)", c.expr, c.expected, actual)
 		}
@@ -50,7 +54,11 @@ func TestField(t *testing.T) {
 	}
 
 	for _, c := range fields {
-		actual := getField(c.expr, bounds{c.min, c.max, nil})
+		actual, err := getFieldWithError(c.expr, bounds{c.min, c.max, nil})
+		if err != nil {
+			t.Errorf("%s => unexpected error %v", c.expr, err)
+			continue
+		}
 		if actual != c.expected {
 			t.Errorf("%s => (expected) %d != %d (actual)", c.expr, c.expected, actual)
 		}

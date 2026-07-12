@@ -142,16 +142,6 @@ func parseSpecWithError(spec string) (Schedule, error) {
 	return schedule, nil
 }
 
-// getField returns an Int with the bits set representing all of the times that
-// the field represents.  A "field" is a comma-separated list of "ranges".
-func getField(field string, r bounds) uint64 {
-	bits, err := getFieldWithError(field, r)
-	if err != nil {
-		log.Panic(err)
-	}
-	return bits
-}
-
 // getFieldWithError returns an Int with the bits set representing all of the times that
 // the field represents.  A "field" is a comma-separated list of "ranges".
 func getFieldWithError(field string, r bounds) (uint64, error) {
@@ -177,17 +167,6 @@ func getFieldWithError(field string, r bounds) (uint64, error) {
 		bits |= b
 	}
 	return bits, nil
-}
-
-// getRange returns the bits indicated by the given expression:
-//
-//	number | number "-" number [ "/" number ]
-func getRange(expr string, r bounds) uint64 {
-	bits, err := getRangeWithError(expr, r)
-	if err != nil {
-		log.Panic(err)
-	}
-	return bits
 }
 
 // getRangeWithError returns the bits indicated by the given expression:
@@ -306,11 +285,11 @@ func getBits(min, max, step uint) uint64 {
 
 	// If step is 1, use shifts.
 	if step == 1 {
-		bits := max - min + 1
-		if bits >= 64 {
+		span := max - min + 1
+		if span >= 64 {
 			return math.MaxUint64
 		}
-		return (uint64(1)<<bits - 1) << min
+		return (uint64(1)<<span - 1) << min
 	}
 
 	// Else, use a simple loop.

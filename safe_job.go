@@ -38,11 +38,6 @@ func (s *SafeJob) Run() {
 	s.Job.Run()
 }
 
-// wrapJobWithMetrics wraps a job with panic recovery and metrics
-func wrapJobWithMetrics(job Job, name string, metrics *Metrics) Job {
-	return &SafeJob{Job: job, Name: name, metrics: metrics}
-}
-
 var (
 	testModeOnce   sync.Once
 	testModeCached bool

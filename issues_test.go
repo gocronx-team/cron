@@ -207,9 +207,9 @@ func TestCRIT3_Fixed_ZombieEntryBlocked(t *testing.T) {
 
 		entry := &Entry{
 			Schedule: fastSchedule{interval: 1 * time.Millisecond},
-			Job: wrapJobWithMetrics(FuncJob(func() {
+			Job: &SafeJob{Job: FuncJob(func() {
 				atomic.AddInt32(&execCount, 1)
-			}), "zombie", c.metrics),
+			}), Name: "zombie", metrics: c.metrics},
 			Name: "zombie-entry",
 		}
 
