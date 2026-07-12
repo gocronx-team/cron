@@ -233,15 +233,6 @@ func (c *Cron) RemoveJobWithResult(name string) bool {
 	}
 }
 
-func (entrySlice entries) pos(name string) int {
-	for p, e := range entrySlice {
-		if e.Name == name {
-			return p
-		}
-	}
-	return -1
-}
-
 // Schedule adds a Job to the Cron to be run on the given schedule.
 func (c *Cron) Schedule(schedule Schedule, cmd Job, name string) {
 	c.ScheduleWithError(schedule, cmd, name)
