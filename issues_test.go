@@ -650,3 +650,75 @@ func TestRemoveJobWithResult_Fixed_ReturnsFalseForNonExistent(t *testing.T) {
 // =============================================================================
 // Extra: wrapJob 死代码已移除（不再有测试）
 // =============================================================================
+
+// =============================================================================
+// GOC-25 [已修复]: Stop/Start 生命周期边角
+// (a) fire 缓冲残留: Stop 后残留在 fire 缓冲中的消息不应被下次 Start 消费
+// (b) StopAndWait 超时翻倍: 两步共享一个 deadline，总等待不超过 timeout
+// =============================================================================
+
+func TestGOC25a_StaleFireNotConsumedAfterRestart(t *testing.T) {
+	c := New()
+	var runs int32
+	// 调度时间远在未来，正常情况下不会触发
+	c.AddFunc("0 0 1 1 *", func() {
+		atomic.AddInt32(&runs, 1)
+	}, "far-future-job")
+
+	c.Start()
+	staleFire := c.fire // 第一次运行的 fire channel
+	c.Stop()
+
+	// 模拟 timer 回调在 select 竞态中赢过 <-c.done，把 entry 残留进缓冲
+	c.mu.Lock()
+	entry := c.entryIndex["far-future-job"]
+	c.mu.Unlock()
+	staleFire <- entry
+
+	// 重启后新 run() 不应消费旧缓冲中的陈旧消息
+	c.Start()
+	time.Sleep(200 * time.Millisecond)
+	c.Stop()
+
+	if got := atomic.LoadInt32(&runs); got != 0 {
+		t.Fatalf("GOC-25(a): 重启后陈旧的 fire 消息被消费，任务多跑了 %d 次", got)
+	}
+	t.Log("GOC-25(a) [已修复]: Start() 重建 fire channel，陈旧消息不会触发额外执行")
+}
+
+func TestGOC25b_StopAndWaitSharedDeadline(t *testing.T) {
+	c := New()
+	jobStarted := make(chan struct{})
+	started := int32(0)
+
+	c.AddFunc("* * * * * *", func() {
+		if atomic.CompareAndSwapInt32(&started, 0, 1) {
+			close(jobStarted)
+		}
+		time.Sleep(10 * time.Second)
+	}, "goc25-long-job")
+
+	c.Start()
+
+	select {
+	case <-jobStarted:
+	case <-time.After(2 * time.Second):
+		c.Stop()
+		t.Skip("GOC-25(b): Job 未在 2 秒内启动")
+		return
+	}
+
+	timeout := 500 * time.Millisecond
+	startTime := time.Now()
+	err := c.StopAndWait(timeout)
+	elapsed := time.Since(startTime)
+
+	if err == nil {
+		t.Fatal("GOC-25(b): 存在 10s 长任务时 StopAndWait(500ms) 应返回超时错误")
+	}
+	// 两步共享 deadline: 总耗时应约等于 timeout，而不是最坏 2*timeout
+	if elapsed > timeout+300*time.Millisecond {
+		t.Fatalf("GOC-25(b): StopAndWait 总耗时 %v 超过共享 deadline 预期（timeout=%v）", elapsed, timeout)
+	}
+	t.Logf("GOC-25(b) [已修复]: StopAndWait 总耗时 %v（timeout=%v，两步共享 deadline）", elapsed, timeout)
+}

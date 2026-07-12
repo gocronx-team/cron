@@ -311,6 +311,10 @@ func (c *Cron) Start() {
 		return
 	}
 	c.done = make(chan struct{})
+	// Recreate the fire channel so stale messages buffered during a previous
+	// run (a timer callback may win the select race against <-c.done) can
+	// never be consumed by the new run() and trigger an immediate extra run.
+	c.fire = make(chan *Entry, 64)
 	atomic.StoreInt32(&c.running, 1)
 	c.mu.Unlock()
 	go c.run()
@@ -421,11 +425,15 @@ func (c *Cron) scheduleEntry(e *Entry) {
 		duration = 0
 	}
 
+	// Capture the channels of the current run: Start() replaces both, so a
+	// late callback from a previous run writes to the old (unread) channel
+	// instead of injecting a stale fire into the new run.
+	fire, done := c.fire, c.done
 	e.timer = time.AfterFunc(duration, func() {
 		// Timer 回调只发信号，不做任何 Entry 修改
 		select {
-		case c.fire <- e:
-		case <-c.done:
+		case fire <- e:
+		case <-done:
 			// run() 已退出，丢弃
 		}
 	})
@@ -468,8 +476,11 @@ func (c *Cron) StopWithTimeout(timeout time.Duration) error {
 }
 
 // StopAndWait stops the cron scheduler and waits for all running jobs to complete.
+// The timeout is a single budget shared by both phases (stopping the scheduler
+// and waiting for running jobs), so the total wait never exceeds it.
 // Returns error if timeout is exceeded.
 func (c *Cron) StopAndWait(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
 	if err := c.StopWithTimeout(timeout); err != nil {
 		return err
 	}
@@ -480,10 +491,12 @@ func (c *Cron) StopAndWait(timeout time.Duration) error {
 		close(done)
 	}()
 
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
 	select {
 	case <-done:
 		return nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		return errors.New("cron: wait timeout exceeded")
 	}
 }
