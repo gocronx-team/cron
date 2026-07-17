@@ -7,6 +7,10 @@ type Metrics struct {
 	TotalRuns   int64
 	TotalPanics int64
 	ActiveJobs  int32
+	// DroppedJobs is the number of fires dropped because the worker pool was
+	// saturated (jobs firing faster than they can run). Non-zero indicates the
+	// scheduler is overloaded.
+	DroppedJobs int64
 }
 
 func (m *Metrics) incRuns() {
