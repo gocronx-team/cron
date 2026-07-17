@@ -429,10 +429,7 @@ func (c *Cron) run() {
 				break
 			}
 			// 所有 Entry 修改都在 run() goroutine 中完成
-			c.workerPool.Submit(e.Job.Run)
-			e.Prev = e.Next
-			e.Next = e.Schedule.Next(e.Next)
-			c.scheduleEntry(e)
+			c.advanceAndReschedule(e, time.Now().Local())
 
 		case <-c.snapshot:
 			c.snapshot <- c.entrySnapshot()
@@ -450,6 +447,22 @@ func (c *Cron) run() {
 			return
 		}
 	}
+}
+
+// advanceAndReschedule runs the fired entry's job, records the fire, and re-arms
+// the timer for the NEXT activation computed from `now`.
+//
+// Computing the next time from `now` (rather than from the entry's stale
+// scheduled time) skips any activations missed while the process was frozen
+// (laptop sleep, container pause, long GC/STW). Advancing from the stale time
+// would return past times that scheduleEntry clamps to a zero delay, firing
+// every missed slot back-to-back — a "catch-up storm". This matches robfig/cron.
+func (c *Cron) advanceAndReschedule(e *Entry, now time.Time) {
+	// 所有 Entry 修改都在 run() goroutine 中完成
+	c.workerPool.Submit(e.Job.Run)
+	e.Prev = e.Next
+	e.Next = e.Schedule.Next(now)
+	c.scheduleEntry(e)
 }
 
 // scheduleEntry creates a timer for the entry (优化: 独立Timer调度)
