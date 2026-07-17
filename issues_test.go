@@ -666,7 +666,7 @@ func TestGOC25a_StaleFireNotConsumedAfterRestart(t *testing.T) {
 	}, "far-future-job")
 
 	c.Start()
-	staleFire := c.fire // 第一次运行的 fire channel
+	staleFire := c.loadFire() // 第一次运行的 fire channel
 	c.Stop()
 
 	// 模拟 timer 回调在 select 竞态中赢过 <-c.done，把 entry 残留进缓冲
