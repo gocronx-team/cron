@@ -553,6 +553,7 @@ func (c *Cron) GetMetrics() Metrics {
 		TotalRuns:   atomic.LoadInt64(&c.metrics.TotalRuns),
 		TotalPanics: atomic.LoadInt64(&c.metrics.TotalPanics),
 		ActiveJobs:  atomic.LoadInt32(&c.metrics.ActiveJobs),
+		DroppedJobs: c.workerPool.Dropped(),
 	}
 }
 
