@@ -37,6 +37,27 @@ var removeReqPool = sync.Pool{
 	},
 }
 
+// putAddReq 归还请求对象前先非阻塞排空 result 缓冲(避免调用方在 <-done 分支返回时
+// 把 run() 已写入的结果残留进池,导致下一个复用者脏读),并清空 entry 引用避免池长期持有。
+func putAddReq(req *addRequest) {
+	select {
+	case <-req.result:
+	default:
+	}
+	req.entry = nil
+	addReqPool.Put(req)
+}
+
+// putRemoveReq 同 putAddReq:归还前排空 result 缓冲并清空 name。
+func putRemoveReq(req *removeRequest) {
+	select {
+	case <-req.result:
+	default:
+	}
+	req.name = ""
+	removeReqPool.Put(req)
+}
+
 // Cron keeps track of any number of entries, invoking the associated func as
 // specified by the schedule. It may be started, stopped, and the entries may
 // be inspected while running.
@@ -235,14 +256,14 @@ func (c *Cron) RemoveJobWithResult(name string) bool {
 	case c.remove <- *req:
 		select {
 		case r := <-req.result:
-			removeReqPool.Put(req)
+			putRemoveReq(req)
 			return r
 		case <-done:
-			removeReqPool.Put(req)
+			putRemoveReq(req)
 			return false
 		}
 	case <-done:
-		removeReqPool.Put(req)
+		putRemoveReq(req)
 		return false
 	}
 }
@@ -289,14 +310,14 @@ func (c *Cron) ScheduleWithError(schedule Schedule, cmd Job, name string) error 
 	case c.add <- *req:
 		select {
 		case err := <-req.result:
-			addReqPool.Put(req)
+			putAddReq(req)
 			return err
 		case <-done:
-			addReqPool.Put(req)
+			putAddReq(req)
 			return errors.New("cron: scheduler stopped")
 		}
 	case <-done:
-		addReqPool.Put(req)
+		putAddReq(req)
 		return errors.New("cron: scheduler stopped")
 	}
 }
